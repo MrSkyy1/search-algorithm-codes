@@ -1,135 +1,290 @@
+import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import heapq
+import math
+import random
+import time
+from sklearn.neural_network import MLPRegressor
 
-# Create a multilayer graph using NetworkX
-def create_multilayer_graph():
-    G = nx.DiGraph()  # Directed graph for this example
-    
-    # Layer 1 - Adding nodes and edges
-    G.add_edge('A', 'B', weight=1, layer=1)
-    G.add_edge('B', 'C', weight=2, layer=1)
-    G.add_edge('C', 'D', weight=1, layer=1)
-    
-    # Layer 2 - Adding nodes and edges
-    G.add_edge('E', 'F', weight=2, layer=2)
-    G.add_edge('F', 'G', weight=3, layer=2)
-    
-    # Inter-layer edges (transition between layers)
-    G.add_edge('C', 'E', weight=5, layer=0)  # Layer 1 -> Layer 2
-    G.add_edge('G', 'A', weight=4, layer=0)  # Layer 2 -> Layer 1
-    
-    return G
 
-# Dijkstra's Algorithm adapted for multilayer graph
-def dijkstra_multilayer(G, start, goal):
-    # Priority queue for Dijkstra's algorithm
-    pq = [(0, start)]
-    distances = {start: 0}
-    previous_nodes = {start: None}
-    
-    while pq:
-        current_distance, current_node = heapq.heappop(pq)
-        
-        if current_node == goal:
-            break
-        
-        # Get neighbors in the current layer
-        for neighbor in G.neighbors(current_node):
-            weight = G[current_node][neighbor]['weight']
-            new_distance = current_distance + weight
-            
-            # Check if this path is better than the previous one
-            if neighbor not in distances or new_distance < distances[neighbor]:
-                distances[neighbor] = new_distance
-                previous_nodes[neighbor] = current_node
-                heapq.heappush(pq, (new_distance, neighbor))
-                
-                # Handle inter-layer connections
-                if G[current_node][neighbor]['layer'] == 0:
-                    inter_layer_transition_weight = G[current_node][neighbor]['weight']
-                    inter_layer_node = neighbor
-                    new_distance = current_distance + inter_layer_transition_weight
-                    
-                    if inter_layer_node not in distances or new_distance < distances[inter_layer_node]:
-                        distances[inter_layer_node] = new_distance
-                        previous_nodes[inter_layer_node] = current_node
-                        heapq.heappush(pq, (new_distance, inter_layer_node))
-    
-    # Reconstruct the path
-    path = []
-    current_node = goal
-    while current_node is not None:
-        path.append(current_node)
-        current_node = previous_nodes[current_node]
-    
-    return path[::-1], distances[goal]
+def safe_divide(a: float, b: float) -> float:
+    """Safe division with NaN protection"""
+    return a / b if abs(b) > 1e-10 else np.nan
 
-# A* Algorithm adapted for multilayer graph
-def a_star_multilayer(G, start, goal, heuristic):
-    # Priority queue for A* algorithm
-    pq = [(0 + heuristic[start], 0, start)]  # (f, g, node)
-    g_scores = {start: 0}
-    f_scores = {start: heuristic[start]}
-    previous_nodes = {start: None}
-    
-    while pq:
-        _, current_g, current_node = heapq.heappop(pq)
-        
-        if current_node == goal:
-            break
-        
-        # Get neighbors in the current layer
-        for neighbor in G.neighbors(current_node):
-            weight = G[current_node][neighbor]['weight']
-            new_g_score = current_g + weight
-            new_f_score = new_g_score + heuristic[neighbor]
-            
-            # Check if this path is better than the previous one
-            if neighbor not in g_scores or new_g_score < g_scores[neighbor]:
-                g_scores[neighbor] = new_g_score
-                f_scores[neighbor] = new_f_score
-                previous_nodes[neighbor] = current_node
-                heapq.heappush(pq, (new_f_score, new_g_score, neighbor))
-                
-                # Handle inter-layer connections
-                if G[current_node][neighbor]['layer'] == 0:
-                    inter_layer_transition_weight = G[current_node][neighbor]['weight']
-                    inter_layer_node = neighbor
-                    new_g_score = current_g + inter_layer_transition_weight
-                    
-                    if inter_layer_node not in g_scores or new_g_score < g_scores[inter_layer_node]:
-                        g_scores[inter_layer_node] = new_g_score
-                        f_scores[inter_layer_node] = new_g_score + heuristic[inter_layer_node]
-                        previous_nodes[inter_layer_node] = current_node
-                        heapq.heappush(pq, (new_g_score + heuristic[inter_layer_node], new_g_score, inter_layer_node))
-    
-    # Reconstruct the path
-    path = []
-    current_node = goal
-    while current_node is not None:
-        path.append(current_node)
-        current_node = previous_nodes[current_node]
-    
-    return path[::-1], g_scores[goal]
 
-# Define heuristic function for A*
-def heuristic(node):
-    heuristics = {
-        'A': 6, 'B': 5, 'C': 4, 'D': 3,
-        'E': 2, 'F': 1, 'G': 0
-    }
-    return heuristics.get(node, 0)
+class MultilayerGraph3D:
+    def __init__(self, layers: int = 5, nodes_per_layer: int = 12):
+        self.layers = layers
+        self.G = nx.MultiDiGraph()
+        self.pos = {}
+        self.layer_types = {
+            0: "Physical",
+            1: "Network",
+            2: "Semantic",
+            3: "Decision",
+            4: "Goal"
+        }
 
-# Test the implementation
-G = create_multilayer_graph()
-start, goal = 'A', 'G'
+        # Fixed angle calculation (removed extra parenthesis)
+        for layer in range(layers):
+            radius = 5 * (1 + safe_divide(float(layer), float(layers)))
+            z = float(layer * 2)
 
-# Dijkstra's Algorithm Result
-dijkstra_path, dijkstra_distance = dijkstra_multilayer(G, start, goal)
-print("Dijkstra's Path:", dijkstra_path)
-print("Dijkstra's Distance:", dijkstra_distance)
+            for i in range(nodes_per_layer):
+                angle = 2 * np.pi * safe_divide(float(i), float(nodes_per_layer))  # Fixed line
+                x = radius * np.cos(angle + layer * 0.3)
+                y = radius * np.sin(angle + layer * 0.3)
+                node_id = f"{self.layer_types[layer][0]}{layer}_N{i}"
+                self.pos[node_id] = (x, y, z)
+                self.G.add_node(node_id, layer=layer, type=self.layer_types[layer], pos=(x, y, z))
 
-# A* Algorithm Result
-a_star_path, a_star_distance = a_star_multilayer(G, start, goal, heuristic)
-print("A* Path:", a_star_path)
-print("A* Distance:", a_star_distance)
+            if layer < layers - 1:
+                for i in range(nodes_per_layer):
+                    src = f"{self.layer_types[layer][0]}{layer}_N{i}"
+                    for j in [i, (i + 1) % nodes_per_layer]:
+                        tgt = f"{self.layer_types[layer + 1][0]}{layer + 1}_N{j}"
+                        weight = 1.0 + abs(np.random.normal(0.5, 0.3)) + (0.2 * float(layer))
+                        if not math.isnan(weight):
+                            self.G.add_edge(src, tgt, weight=float(weight), type='inter')
+
+        for layer in range(layers):
+            nodes = [n for n in self.G.nodes() if self.G.nodes[n]['layer'] == layer]
+            for i, u in enumerate(nodes):
+                for j in [(i + 1) % len(nodes), (i + 2) % len(nodes)]:
+                    v = nodes[j]
+                    weight = 0.3 + abs(np.random.normal(0.1, 0.05))
+                    if not math.isnan(weight):
+                        self.G.add_edge(u, v, weight=float(weight), type='intra')
+
+        self._train_heuristic_model()
+
+    def _train_heuristic_model(self) -> None:
+        X, y = [], []
+        for u, v, data in self.G.edges(data=True):
+            pos_u = np.array(self.pos[u])
+            pos_v = np.array(self.pos[v])
+            if not np.isnan(pos_u).any() and not np.isnan(pos_v).any():
+                X.append(np.concatenate([pos_u, pos_v]))
+                y.append(float(data['weight']))
+
+        if X:
+            self.heuristic_model = MLPRegressor(hidden_layer_sizes=(16,), max_iter=2000)
+            self.heuristic_model.fit(X[:len(X) // 2], y[:len(y) // 2])
+
+
+class Dijkstra3D:
+    def __init__(self, graph: MultilayerGraph3D):
+        self.graph = graph
+        self.pos = nx.get_node_attributes(graph.G, 'pos')
+
+    def search(self, start_node: str, goal_node: str) -> tuple:
+        distances = {node: float('inf') for node in self.graph.G.nodes()}
+        distances[start_node] = 0.0
+        prev_nodes = {node: None for node in self.graph.G.nodes()}
+        heap = [(0.0, start_node)]
+        visited_layers = set()
+
+        while heap:
+            current_dist, current_node = heapq.heappop(heap)
+            current_layer = self.graph.G.nodes[current_node]['layer']
+            visited_layers.add(current_layer)
+
+            if current_node == goal_node:
+                break
+
+            if current_dist > distances[current_node]:
+                continue
+
+            for neighbor in self.graph.G.neighbors(current_node):
+                edge_data = self.graph.G[current_node][neighbor][0]
+                distance = current_dist + float(edge_data['weight'])
+
+                if distance < distances[neighbor]:
+                    distances[neighbor] = distance
+                    prev_nodes[neighbor] = current_node
+                    heapq.heappush(heap, (distance, neighbor))
+
+        path = []
+        node = goal_node
+        while node is not None:
+            path.append(node)
+            node = prev_nodes.get(node, None)
+        path.reverse()
+
+        final_cost = distances.get(goal_node, float('inf'))
+        return path, visited_layers, final_cost if math.isfinite(final_cost) else np.nan
+
+
+class AStar3D(Dijkstra3D):
+    def heuristic(self, a: str, b: str) -> float:
+        pos_a = np.array(self.pos[a])
+        pos_b = np.array(self.pos[b])
+        if np.isnan(pos_a).any() or np.isnan(pos_b).any():
+            return float('inf')
+
+        geometric_dist = np.linalg.norm(pos_a - pos_b)
+
+        if hasattr(self.graph, 'heuristic_model'):
+            try:
+                edge_features = np.concatenate([pos_a, pos_b]).reshape(1, -1)
+                learned_cost = float(self.graph.heuristic_model.predict(edge_features)[0])
+                return 0.6 * geometric_dist + 0.4 * learned_cost
+            except Exception as e:
+                print(f"Heuristic prediction failed: {e}")
+                return geometric_dist * 0.8
+        return geometric_dist * 0.8
+
+
+class GraphVisualizer3D:
+    def __init__(self, graph: MultilayerGraph3D):
+        self.graph = graph
+        self.fig = plt.figure(figsize=(22, 10))
+        self.pos = nx.get_node_attributes(graph.G, 'pos')
+        self.layer_colors = plt.colormaps['plasma'](np.linspace(0, 1, graph.layers))
+
+        self.ax_dijkstra = self.fig.add_subplot(121, projection='3d')
+        self.ax_astar = self.fig.add_subplot(122, projection='3d')
+
+        for ax in [self.ax_dijkstra, self.ax_astar]:
+            ax.set_proj_type('persp')
+            ax.xaxis.set_pane_color((0.95, 0.95, 0.95, 0.9))
+            ax.yaxis.set_pane_color((0.95, 0.95, 0.95, 0.9))
+            ax.zaxis.set_pane_color((0.95, 0.95, 0.95, 0.9))
+            ax.grid(True, linestyle=':', alpha=0.5)
+            ax.set_xlabel('X Dimension', fontsize=10)
+            ax.set_ylabel('Y Dimension', fontsize=10)
+            ax.set_zlabel('Abstraction Level', fontsize=10)
+
+    def _create_3d_lines(self, edges: list, color: str, alpha: float, width: float) -> Line3DCollection:
+        segments = []
+        for u, v in edges:
+            if u in self.pos and v in self.pos:
+                segments.append([self.pos[u], self.pos[v]])
+        return Line3DCollection(segments, colors=color, linewidths=width, alpha=alpha, zorder=1)
+
+    def _draw_algorithm(self, ax: plt.Axes, title: str, path: list, path_color: str) -> None:
+        valid_edges = [(u, v) for u, v in self.graph.G.edges() if u in self.pos and v in self.pos]
+        edge_collection = self._create_3d_lines(valid_edges, 'lightgray', 0.15, 0.7)
+        ax.add_collection3d(edge_collection)
+
+        if path:
+            valid_path_edges = [(u, v) for u, v in zip(path[:-1], path[1:]) if u in self.pos and v in self.pos]
+            path_collection = self._create_3d_lines(valid_path_edges, path_color, 1.0, 3)
+            ax.add_collection3d(path_collection)
+
+            for u, v in valid_path_edges:
+                edge_data = self.graph.G[u][v][0]
+                mid_point = (np.array(self.pos[u]) + np.array(self.pos[v])) / 2
+                if not np.isnan(mid_point).any():
+                    layer_u = self.graph.G.nodes[u]['layer']
+                    layer_v = self.graph.G.nodes[v]['layer']
+                    ax.text(*mid_point,
+                            f"{self.graph.layer_types[layer_u]}→{self.graph.layer_types[layer_v]}",
+                            color='black', fontsize=8, ha='center',
+                            bbox=dict(facecolor='white', alpha=0.7, pad=1))
+
+        for node, (x, y, z) in list(self.pos.items()):
+            if not np.isnan([x, y, z]).any():
+                layer = self.graph.G.nodes[node]['layer']
+                node_type = self.graph.G.nodes[node]['type']
+                is_special = path and (node == path[0] or node == path[-1])
+
+                ax.scatter(
+                    x, y, z,
+                    color=self.layer_colors[layer],
+                    s=200 if is_special else 80,
+                    edgecolors='black',
+                    linewidths=1.5 if is_special else 0.5,
+                    alpha=1,
+                    zorder=3
+                )
+
+                if is_special:
+                    ax.text(x, y, z + 0.4, f"{node}\n({node_type})",
+                            fontsize=9, ha='center', va='bottom')
+
+        ax.set_title(f"{title}\nLayers: {self.graph.layers}", pad=20)
+        ax.view_init(elev=30, azim=45)
+
+    def draw(self, dijkstra_path: list = None, astar_path: list = None) -> None:
+        self._draw_algorithm(self.ax_dijkstra, "Dijkstra's Algorithm", dijkstra_path, 'red')
+        self._draw_algorithm(self.ax_astar, "A* with Learned Heuristic", astar_path, 'blue')
+
+        cbar_ax = self.fig.add_axes([0.92, 0.15, 0.02, 0.7])
+        sm = plt.cm.ScalarMappable(cmap=plt.colormaps['plasma'],
+                                   norm=plt.Normalize(vmin=0, vmax=self.graph.layers - 1))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, cax=cbar_ax)
+        cbar.set_label('Abstraction Level', rotation=270, labelpad=25)
+        cbar.set_ticks(range(self.graph.layers))
+        cbar.set_ticklabels([self.graph.layer_types[i] for i in range(self.graph.layers)])
+
+        self.fig.suptitle("Search Algorithms for Multilayer AI Systems",
+                          fontsize=14, y=0.98)
+        plt.subplots_adjust(left=0.05, right=0.88, bottom=0.05, top=0.9, wspace=0.2)
+        plt.show()
+
+
+def benchmark_algorithms(graph: MultilayerGraph3D, n_trials: int = 50) -> None:
+    dijkstra_times, astar_times = [], []
+    dijkstra_costs, astar_costs = [], []
+    failed_searches = 0
+
+    nodes = list(graph.G.nodes())
+    for _ in range(n_trials):
+        start_node, goal_node = random.sample(nodes, 2)
+
+        t0 = time.time()
+        _, _, cost_d = Dijkstra3D(graph).search(start_node, goal_node)
+        dijkstra_times.append(time.time() - t0)
+        dijkstra_costs.append(cost_d if math.isfinite(cost_d) else np.nan)
+
+        t0 = time.time()
+        _, _, cost_a = AStar3D(graph).search(start_node, goal_node)
+        astar_times.append(time.time() - t0)
+        astar_costs.append(cost_a if math.isfinite(cost_a) else np.nan)
+
+        if not math.isfinite(cost_d) or not math.isfinite(cost_a):
+            failed_searches += 1
+
+    valid_ratio = (n_trials - failed_searches) / n_trials
+    mean_dijkstra = np.nanmean(dijkstra_times)
+    mean_astar = np.nanmean(astar_times)
+    mean_cost_diff = np.nanmean(astar_costs) - np.nanmean(dijkstra_costs)
+
+    print("\n" + "=" * 60)
+    print("AI MULTILAYER GRAPH BENCHMARK RESULTS")
+    print(f"Successful Paths: {n_trials - failed_searches}/{n_trials} ({valid_ratio:.1%})")
+    print(f"Dijkstra Average: {mean_dijkstra:.4f}s ± {np.nanstd(dijkstra_times):.4f}s")
+    print(f"A* Average: {mean_astar:.4f}s ± {np.nanstd(astar_times):.4f}s")
+    print(f"Speedup Factor: {safe_divide(mean_dijkstra, mean_astar):.2f}x")
+    print(f"Cost Difference: {mean_cost_diff:.4f} (A* vs Dijkstra)")
+    print("=" * 60 + "\n")
+
+
+if __name__ == "__main__":
+    print("Initializing AI Multilayer Graph...")
+    mg = MultilayerGraph3D(layers=5, nodes_per_layer=10)
+
+    start_node = "P0_N0"
+    goal_node = "G4_N5"
+
+    print("\nRunning Dijkstra's algorithm...")
+    d_path, d_layers, d_cost = Dijkstra3D(mg).search(start_node, goal_node)
+
+    print("Running A* algorithm with learned heuristic...")
+    a_path, a_layers, a_cost = AStar3D(mg).search(start_node, goal_node)
+
+    print("\nAlgorithm Results:")
+    print(f"Dijkstra Path: {' → '.join(d_path)}")
+    print(f"  Cost: {d_cost:.2f}, Layers Visited: {sorted(d_layers)}")
+    print(f"A* Path: {' → '.join(a_path)}")
+    print(f"  Cost: {a_cost:.2f}, Layers Visited: {sorted(a_layers)}")
+
+    benchmark_algorithms(mg, n_trials=30)
+
+    print("Generating visualization...")
+    vis = GraphVisualizer3D(mg)
+    vis.draw(dijkstra_path=d_path, astar_path=a_path)
