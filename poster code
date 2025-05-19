@@ -1,3 +1,4 @@
+# Import required libraries
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -8,17 +9,19 @@ import random
 import time
 from sklearn.neural_network import MLPRegressor
 
-
+# Safe division function to avoid divide-by-zero errors
 def safe_divide(a: float, b: float) -> float:
-    """Safe division with NaN protection"""
     return a / b if abs(b) > 1e-10 else np.nan
 
 
+# 3D Multilayer Graph representation
 class MultilayerGraph3D:
     def __init__(self, layers: int = 5, nodes_per_layer: int = 12):
         self.layers = layers
-        self.G = nx.MultiDiGraph()
-        self.pos = {}
+        self.G = nx.MultiDiGraph()  # Directed multigraph
+        self.pos = {}  # Stores node positions for 3D plotting
+
+        # Define layer types for abstraction levels
         self.layer_types = {
             0: "Physical",
             1: "Network",
@@ -27,19 +30,20 @@ class MultilayerGraph3D:
             4: "Goal"
         }
 
-        # Fixed angle calculation (removed extra parenthesis)
+        # Generate nodes with spatial layout
         for layer in range(layers):
             radius = 5 * (1 + safe_divide(float(layer), float(layers)))
             z = float(layer * 2)
 
             for i in range(nodes_per_layer):
-                angle = 2 * np.pi * safe_divide(float(i), float(nodes_per_layer))  # Fixed line
+                angle = 2 * np.pi * safe_divide(float(i), float(nodes_per_layer))
                 x = radius * np.cos(angle + layer * 0.3)
                 y = radius * np.sin(angle + layer * 0.3)
                 node_id = f"{self.layer_types[layer][0]}{layer}_N{i}"
                 self.pos[node_id] = (x, y, z)
                 self.G.add_node(node_id, layer=layer, type=self.layer_types[layer], pos=(x, y, z))
 
+            # Connect to next layer (inter-layer edges)
             if layer < layers - 1:
                 for i in range(nodes_per_layer):
                     src = f"{self.layer_types[layer][0]}{layer}_N{i}"
@@ -49,6 +53,7 @@ class MultilayerGraph3D:
                         if not math.isnan(weight):
                             self.G.add_edge(src, tgt, weight=float(weight), type='inter')
 
+        # Create intra-layer connections (within same layer)
         for layer in range(layers):
             nodes = [n for n in self.G.nodes() if self.G.nodes[n]['layer'] == layer]
             for i, u in enumerate(nodes):
@@ -58,6 +63,7 @@ class MultilayerGraph3D:
                     if not math.isnan(weight):
                         self.G.add_edge(u, v, weight=float(weight), type='intra')
 
+        # Train a model to estimate edge weights heuristically
         self._train_heuristic_model()
 
     def _train_heuristic_model(self) -> None:
@@ -74,12 +80,14 @@ class MultilayerGraph3D:
             self.heuristic_model.fit(X[:len(X) // 2], y[:len(y) // 2])
 
 
+# Dijkstra's algorithm implementation
 class Dijkstra3D:
     def __init__(self, graph: MultilayerGraph3D):
         self.graph = graph
         self.pos = nx.get_node_attributes(graph.G, 'pos')
 
     def search(self, start_node: str, goal_node: str) -> tuple:
+        # Initialize distances and priority queue
         distances = {node: float('inf') for node in self.graph.G.nodes()}
         distances[start_node] = 0.0
         prev_nodes = {node: None for node in self.graph.G.nodes()}
@@ -106,6 +114,7 @@ class Dijkstra3D:
                     prev_nodes[neighbor] = current_node
                     heapq.heappush(heap, (distance, neighbor))
 
+        # Reconstruct path
         path = []
         node = goal_node
         while node is not None:
@@ -117,6 +126,7 @@ class Dijkstra3D:
         return path, visited_layers, final_cost if math.isfinite(final_cost) else np.nan
 
 
+# A* algorithm with learned heuristic
 class AStar3D(Dijkstra3D):
     def heuristic(self, a: str, b: str) -> float:
         pos_a = np.array(self.pos[a])
@@ -137,6 +147,7 @@ class AStar3D(Dijkstra3D):
         return geometric_dist * 0.8
 
 
+# Visualization of search paths in 3D
 class GraphVisualizer3D:
     def __init__(self, graph: MultilayerGraph3D):
         self.graph = graph
@@ -144,9 +155,11 @@ class GraphVisualizer3D:
         self.pos = nx.get_node_attributes(graph.G, 'pos')
         self.layer_colors = plt.colormaps['plasma'](np.linspace(0, 1, graph.layers))
 
+        # Two subplots: one for each algorithm
         self.ax_dijkstra = self.fig.add_subplot(121, projection='3d')
         self.ax_astar = self.fig.add_subplot(122, projection='3d')
 
+        # Common settings
         for ax in [self.ax_dijkstra, self.ax_astar]:
             ax.set_proj_type('persp')
             ax.xaxis.set_pane_color((0.95, 0.95, 0.95, 0.9))
@@ -169,11 +182,13 @@ class GraphVisualizer3D:
         edge_collection = self._create_3d_lines(valid_edges, 'lightgray', 0.15, 0.7)
         ax.add_collection3d(edge_collection)
 
+        # Highlight the path found
         if path:
             valid_path_edges = [(u, v) for u, v in zip(path[:-1], path[1:]) if u in self.pos and v in self.pos]
             path_collection = self._create_3d_lines(valid_path_edges, path_color, 1.0, 3)
             ax.add_collection3d(path_collection)
 
+            # Add labels for transition type between layers
             for u, v in valid_path_edges:
                 edge_data = self.graph.G[u][v][0]
                 mid_point = (np.array(self.pos[u]) + np.array(self.pos[v])) / 2
@@ -185,6 +200,7 @@ class GraphVisualizer3D:
                             color='black', fontsize=8, ha='center',
                             bbox=dict(facecolor='white', alpha=0.7, pad=1))
 
+        # Draw all nodes
         for node, (x, y, z) in list(self.pos.items()):
             if not np.isnan([x, y, z]).any():
                 layer = self.graph.G.nodes[node]['layer']
@@ -212,6 +228,7 @@ class GraphVisualizer3D:
         self._draw_algorithm(self.ax_dijkstra, "Dijkstra's Algorithm", dijkstra_path, 'red')
         self._draw_algorithm(self.ax_astar, "A* with Learned Heuristic", astar_path, 'blue')
 
+        # Colorbar and global title
         cbar_ax = self.fig.add_axes([0.92, 0.15, 0.02, 0.7])
         sm = plt.cm.ScalarMappable(cmap=plt.colormaps['plasma'],
                                    norm=plt.Normalize(vmin=0, vmax=self.graph.layers - 1))
@@ -227,6 +244,7 @@ class GraphVisualizer3D:
         plt.show()
 
 
+# Performance comparison of Dijkstra and A* algorithms
 def benchmark_algorithms(graph: MultilayerGraph3D, n_trials: int = 50) -> None:
     dijkstra_times, astar_times = [], []
     dijkstra_costs, astar_costs = [], []
@@ -249,6 +267,7 @@ def benchmark_algorithms(graph: MultilayerGraph3D, n_trials: int = 50) -> None:
         if not math.isfinite(cost_d) or not math.isfinite(cost_a):
             failed_searches += 1
 
+    # Show stats
     valid_ratio = (n_trials - failed_searches) / n_trials
     mean_dijkstra = np.nanmean(dijkstra_times)
     mean_astar = np.nanmean(astar_times)
@@ -264,6 +283,7 @@ def benchmark_algorithms(graph: MultilayerGraph3D, n_trials: int = 50) -> None:
     print("=" * 60 + "\n")
 
 
+# Main execution: build graph, run both algorithms, visualize, and benchmark
 if __name__ == "__main__":
     print("Initializing AI Multilayer Graph...")
     mg = MultilayerGraph3D(layers=5, nodes_per_layer=10)
